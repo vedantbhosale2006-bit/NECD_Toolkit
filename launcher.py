@@ -84,7 +84,7 @@ class LauncherWindow(QMainWindow):
     def launch_router(self):
         """Spawns the router application as a separate subprocess."""
         try:
-            subprocess.Popen([sys.executable, "router_app.py"])
+            subprocess.Popen([sys.executable, "router_proxy_app.py"])
         except Exception as e:
             print(f"Error launching router: {e}")
 
