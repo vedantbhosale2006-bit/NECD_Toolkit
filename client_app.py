@@ -8,15 +8,18 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QComboBox, QGroupBox
 )
 
+from core_tools import ErrorControlToolkit
+
 DARK_STYLE = """
 QMainWindow { background-color: #121214; }
 QWidget { color: #e1e1e6; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }
 QGroupBox { border: 1px solid #29292e; border-radius: 8px; margin-top: 12px; padding-top: 16px; font-weight: bold; color: #00b37e; }
 QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
-QPushButton { background-color: #00b37e; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: bold; }
+QPushButton { background-color: #00b37e; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: bold; font-size: 13px; }
 QPushButton:hover { background-color: #00875f; }
 QPushButton:pressed { background-color: #015f43; }
-QTextEdit, QLineEdit, QComboBox { background-color: #1a1a1e; border: 1px solid #29292e; border-radius: 6px; color: #00f0ff; font-family: 'Consolas', monospace; padding: 8px; }
+QTextEdit, QLineEdit, QComboBox { background-color: #1a1a1e; border: 1px solid #29292e; border-radius: 6px; color: #00f0ff; font-family: 'Consolas', monospace; padding: 8px; font-size: 13px; }
+QComboBox QAbstractItemView { background-color: #1a1a1e; color: #00f0ff; selection-background-color: #00875f; selection-color: white; font-size: 13px; }
 QComboBox::drop-down { border: 0px; }
 """
 
@@ -49,7 +52,7 @@ class ClientWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NECD Toolkit — End Device Client")
-        self.resize(800, 600)
+        self.resize(800, 650)
         self.sock = None
         self.listener_thread = None
         self.init_ui()
@@ -91,6 +94,14 @@ class ClientWindow(QMainWindow):
         self.recipient_combo = QComboBox()
         target_layout.addWidget(self.recipient_combo)
         send_layout.addLayout(target_layout)
+
+        # Algorithm Selection Dropdown
+        algo_layout = QHBoxLayout()
+        algo_layout.addWidget(QLabel("Error Control Algorithm:"))
+        self.algo_combo = QComboBox()
+        self.algo_combo.addItems(["CRC-32 Checksum", "Hamming(7,4) Correction","1D Parity Check","2D Parity Matrix"])
+        algo_layout.addWidget(self.algo_combo)
+        send_layout.addLayout(algo_layout)
         
         send_layout.addWidget(QLabel("Message Payload:"))
         self.message_input = QLineEdit()
@@ -129,11 +140,9 @@ class ClientWindow(QMainWindow):
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.connect((ip, port))
                 
-                # Send registration packet
                 reg_packet = json.dumps({"action": "register", "name": client_name})
                 self.sock.sendall(reg_packet.encode('utf-8'))
 
-                # Start background listener thread
                 self.listener_thread = ClientListenerThread(self.sock)
                 self.listener_thread.packet_received.connect(self.handle_incoming_packet)
                 self.listener_thread.disconnected.connect(self.handle_disconnect)
@@ -174,6 +183,7 @@ class ClientWindow(QMainWindow):
         recipient = self.recipient_combo.currentText()
         payload = self.message_input.text()
         sender = self.name_input.text()
+        algo = self.algo_combo.currentText()
 
         if not recipient:
             self.recv_console.append("[!] Error: No recipient selected!")
@@ -182,14 +192,65 @@ class ClientWindow(QMainWindow):
             return
 
         try:
+            metadata = {}
+            payload_to_send = payload
+
+            if "CRC-32" in algo:
+                checksum = ErrorControlToolkit.compute_crc32(payload)
+                metadata = {"algorithm": "crc32", "checksum": checksum}
+                self.recv_console.append(f"[->] Sent to [{recipient}] via CRC-32: '{payload}'")
+                self.recv_console.append(f"    [Generated Checksum]: {checksum}")
+
+            elif "Hamming" in algo:
+                bits = ErrorControlToolkit.text_to_bits(payload)
+                encoded_blocks = []
+                for i in range(0, len(bits), 4):
+                    nibble = bits[i:i+4]
+                    if len(nibble) < 4:
+                        nibble = nibble.ljust(4, '0')
+                    encoded_blocks.append(ErrorControlToolkit.hamming_encode(nibble))
+            
+                # Send the concatenated binary string as the payload 
+                # so the router proxy's binary noise injector flips individual 1s and 0s!
+                payload_to_send = "".join(encoded_blocks)
+                metadata = {
+                    "algorithm": "hamming74", 
+                    "original_bit_len": len(bits)
+                }
+                self.recv_console.append(f"[->] Sent to [{recipient}] via Hamming(7,4): '{payload}'")
+                self.recv_console.append(f"    [Generated Encoded Blocks]: {encoded_blocks}")
+
+            elif "1D Parity" in algo:
+                bits = ErrorControlToolkit.text_to_bits(payload)
+                # Split bits into 8-bit bytes (or chunks) and add 1D parity to each
+                encoded_blocks = []
+                for i in range(0, len(bits), 8):
+                    chunk = bits[i:i+8].ljust(8, '0')
+                    parity_block = ErrorControlToolkit.compute_1d_parity(chunk, parity_type='even')
+                    encoded_blocks.append(parity_block)
+                
+                payload_to_send = "".join(encoded_blocks)
+                metadata = {"algorithm": "parity_1d", "original_len": len(bits)}
+                self.recv_console.append(f"[->] Sent to [{recipient}] via 1D Parity: '{payload}'")
+                self.recv_console.append(f"    [Generated 1D Blocks]: {encoded_blocks}")
+
+            elif "2D Parity" in algo:
+                bits = ErrorControlToolkit.text_to_bits(payload)
+                encoded_blocks = ErrorControlToolkit.compute_2d_parity(bits)
+                
+                payload_to_send = "".join(encoded_blocks)
+                metadata = {"algorithm": "parity_2d", "original_len": len(bits)}
+                self.recv_console.append(f"[->] Sent to [{recipient}] via 2D Parity: '{payload}'")
+                self.recv_console.append(f"    [Generated 2D Blocks]: {encoded_blocks}")
+                
             packet = json.dumps({
                 "action": "message",
                 "sender": sender,
                 "recipient": recipient,
-                "payload": payload
+                "payload": payload_to_send,
+                "metadata": metadata
             })
             self.sock.sendall(packet.encode('utf-8'))
-            self.recv_console.append(f"[->] Sent to [{recipient}]: '{payload}'")
             self.message_input.clear()
         except Exception as e:
             self.recv_console.append(f"[!] Send error: {e}")
@@ -201,17 +262,117 @@ class ClientWindow(QMainWindow):
             all_clients = packet.get("clients", [])
             my_name = self.name_input.text()
             
-            # Update recipient dropdown excluding self
             self.recipient_combo.clear()
             for c in all_clients:
                 if c != my_name:
                     self.recipient_combo.addItem(c)
-                    
+                
         elif p_type == "incoming_message":
             sender = packet.get("sender")
             payload = packet.get("payload")
-            self.recv_console.append(f"[<-] Received from [{sender}]: '{payload}'")
-            
+            metadata = packet.get("metadata", {})
+            algo_type = metadata.get("algorithm", "crc32")
+
+            self.recv_console.append(f"[<-] Received from [{sender}] (Algorithm: {algo_type.upper()}):")
+
+            if algo_type == "crc32":
+                expected_checksum = metadata.get("checksum", "")
+                computed_checksum = ErrorControlToolkit.compute_crc32(payload)
+                is_valid = ErrorControlToolkit.verify_crc32(payload, expected_checksum)
+
+                self.recv_console.append(f"    [Raw Payload]: '{payload}'")
+                self.recv_console.append(f"    [CRC-32 Check]:")
+                self.recv_console.append(f"       -> Expected Checksum: {expected_checksum}")
+                self.recv_console.append(f"       -> Computed Checksum: {computed_checksum}")
+                if is_valid:
+                    self.recv_console.append(f"       -> Status: SUCCESS ✅ (Data is uncorrupted)")
+                else:
+                    self.recv_console.append(f"       -> Status: FAILED ❌ (Bit error detected!)")
+
+            elif algo_type == "hamming74":
+                payload_bits = payload # This is now the corrupted bitstream from the router
+                original_bit_len = metadata.get("original_bit_len", len(payload_bits))
+                
+                received_blocks = []
+                healed_blocks = []
+                healed_bits = ""
+                total_errors_corrected = 0
+
+                # Process the corrupted bitstream in 7-bit blocks
+                for i in range(0, len(payload_bits), 7):
+                    chunk = payload_bits[i:i+7]
+                    if len(chunk) < 7:
+                        chunk = chunk.ljust(7, '0')
+                    
+                    received_blocks.append(chunk)
+                    healed_nibble, err_count = ErrorControlToolkit.hamming_decode(chunk)
+                    
+                    # Reconstruct the healed 7-bit block for display
+                    # (re-encode the healed nibble to show what the clean block looks like)
+                    healed_block = ErrorControlToolkit.hamming_encode(healed_nibble)
+                    healed_blocks.append(healed_block)
+                    
+                    healed_bits += healed_nibble
+                    total_errors_corrected += err_count
+
+                healed_bits = healed_bits[:original_bit_len]
+                recovered_text = ErrorControlToolkit.bits_to_text(healed_bits)
+
+                self.recv_console.append(f"    [Hamming(7,4) Correction Details]:")
+                self.recv_console.append(f"       -> Received Corrupted Blocks: {received_blocks}")
+                self.recv_console.append(f"       -> Healed / Corrected Blocks: {healed_blocks}")
+                self.recv_console.append(f"       -> Single-Bit Errors Corrected: {total_errors_corrected}")
+                self.recv_console.append(f"       -> Recovered Message: '{recovered_text}'")
+                
+            elif algo_type == "parity_1d":
+                original_len = metadata.get("original_len", len(payload))
+                received_blocks = []
+                errors_detected = 0
+                processed_bits = ""
+
+                # Each 1D parity block is 9 bits (8 data + 1 parity)
+                for i in range(0, len(payload), 9):
+                    chunk = payload[i:i+9]
+                    if len(chunk) < 9:
+                        chunk = chunk.ljust(9, '0')
+                    received_blocks.append(chunk)
+                    
+                    is_valid = ErrorControlToolkit.verify_1d_parity(chunk, parity_type='even')
+                    if not is_valid:
+                        errors_detected += 1
+                    processed_bits += chunk[:8]
+
+                processed_bits = processed_bits[:original_len]
+                recovered_text = ErrorControlToolkit.bits_to_text(processed_bits)
+
+                self.recv_console.append(f"    [1D Parity Details]:")
+                self.recv_console.append(f"       -> Received 9-bit Blocks: {received_blocks}")
+                self.recv_console.append(f"       -> Parity Errors Detected: {errors_detected}")
+                self.recv_console.append(f"       -> Recovered Message: '{recovered_text}'")
+
+            elif algo_type == "parity_2d":
+                original_len = metadata.get("original_len", len(payload))
+                received_blocks = []
+                row_size = 8  # 7 data bits + 1 parity bit based on core_tools implementation
+                
+                for i in range(0, len(payload), row_size):
+                    chunk = payload[i:i+row_size]
+                    if len(chunk) < row_size:
+                        chunk = chunk.ljust(row_size, '0')
+                    received_blocks.append(chunk)
+
+                corrected_matrix, corrections_made = ErrorControlToolkit.verify_and_correct_2d_parity(received_blocks)
+                
+                # Reconstruct bits from corrected rows
+                processed_bits = "".join([row[:-1] for row in corrected_matrix if len(row) > 1])
+                processed_bits = processed_bits[:original_len]
+                recovered_text = ErrorControlToolkit.bits_to_text(processed_bits)
+
+                self.recv_console.append(f"    [2D Parity Matrix Details]:")
+                self.recv_console.append(f"       -> Received Matrix Blocks: {received_blocks}")
+                self.recv_console.append(f"       -> Matrix Corrections Made: {corrections_made}")
+                self.recv_console.append(f"       -> Recovered Message: '{recovered_text}'")
+                
         elif p_type == "error":
             err_msg = packet.get("message")
             self.recv_console.append(f"[!] Server Notice: {err_msg}")

@@ -121,9 +121,9 @@ class ErrorControlToolkit:
 
         healed_nibble = f"{d0}{d1}{d2}{d3}"
         return healed_nibble, error_count
-
+    
     # ==========================================
-    # 5. ADVANCED: 2D Parity Matrix (Block Interleaving)
+    # 5. ADVANCED: 2D Parity Matrix
     # ==========================================
     @staticmethod
     def compute_2d_parity(data_stream: str) -> list[str]:
@@ -132,22 +132,74 @@ class ErrorControlToolkit:
         row_size = 7
         rows = [data_stream[i:i+row_size] for i in range(0, len(data_stream), row_size)]
         
-        # Pad last row if short
         if rows and len(rows[-1]) < row_size:
             rows[-1] = rows[-1].ljust(row_size, '0')
 
         matrix_with_parities = []
+        matrix_bits = []
         for row in rows:
             ones = row.count('1')
             row_parity = '0' if ones % 2 == 0 else '1'
             matrix_with_parities.append(row + row_parity)
+            matrix_bits.append(list(row))
 
+        # Compute column parities
+        col_parities = []
+        for col_idx in range(row_size):
+            col_bits = [matrix_bits[row_idx][col_idx] for row_idx in range(len(matrix_bits))]
+            ones = col_bits.count('1')
+            col_parities.append('0' if ones % 2 == 0 else '1')
+        
+        # Append column parity row as the last block
+        matrix_with_parities.append("".join(col_parities) + '0')
         return matrix_with_parities
 
     @staticmethod
     def verify_and_correct_2d_parity(received_matrix: list[str]) -> tuple[list[str], int]:
-        """Detect and correct burst errors using intersecting row and column parities."""
-        # Simple placeholder for structural completeness
-        corrected_matrix = list(received_matrix)
+        """Detect and correct single-bit errors using intersecting row and column parities."""
+        if not received_matrix or len(received_matrix) < 2:
+            return received_matrix, 0
+
+        data_rows = [list(row[:-1]) for row in received_matrix[:-1]]
+        row_parities = [row[-1] for row in received_matrix[:-1]]
+        col_parity_row = list(received_matrix[-1][:-1])
+
         corrections_made = 0
+        num_rows = len(data_rows)
+        num_cols = len(data_rows[0]) if num_rows > 0 else 0
+
+        # Check row parities
+        bad_row = -1
+        for r in range(num_rows):
+            ones = data_rows[r].count('1')
+            expected_p = '0' if ones % 2 == 0 else '1'
+            if expected_p != row_parities[r]:
+                bad_row = r
+                break
+
+        # Check column parities
+        bad_col = -1
+        for c in range(num_cols):
+            col_bits = [data_rows[r][c] for r in range(num_rows)]
+            ones = col_bits.count('1')
+            expected_p = '0' if ones % 2 == 0 else '1'
+            # Compare against calculated or received column parity if available
+            if c < len(col_parity_row) and expected_p != col_parity_row[c]:
+                bad_col = c
+                break
+
+        # If a single-bit error intersection is found, flip it!
+        if bad_row != -1 and bad_col != -1:
+            data_rows[bad_row][bad_col] = '1' if data_rows[bad_row][bad_col] == '0' else '0'
+            corrections_made += 1
+
+        # Rebuild formatted rows
+        corrected_matrix = []
+        for r in range(num_rows):
+            row_str = "".join(data_rows[r])
+            ones = row_str.count('1')
+            p = '0' if ones % 2 == 0 else '1'
+            corrected_matrix.append(row_str + p)
+        corrected_matrix.append(received_matrix[-1])
+
         return corrected_matrix, corrections_made

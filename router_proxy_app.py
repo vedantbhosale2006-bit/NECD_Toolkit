@@ -62,27 +62,37 @@ class ServerThread(QThread):
         if self.ber_rate <= 0:
             return payload_str, 0
 
-        data_bytes = bytearray(payload_str.encode('utf-8'))
-        flipped_bits_count = 0
-
-        for i in range(len(data_bytes)):
-            byte_val = data_bytes[i]
-            new_byte_val = 0
-            for bit in range(8):
-                bit_val = (byte_val >> bit) & 1
-                # Check probability for bit error
+        # Ensure payload is a string and check if it contains ONLY '0' and '1'
+        if isinstance(payload_str, str) and len(payload_str) > 0 and all(c in '01' for c in payload_str):
+            bit_list = list(payload_str)
+            flipped_bits_count = 0
+            for i in range(len(bit_list)):
                 if random.random() < (self.ber_rate / 100.0):
-                    bit_val = 1 - bit_val  # Flip bit (0 -> 1 or 1 -> 0)
+                    bit_list[i] = '1' if bit_list[i] == '0' else '0'
                     flipped_bits_count += 1
-                new_byte_val |= (bit_val << bit)
-            data_bytes[i] = new_byte_val
+            return "".join(bit_list), flipped_bits_count
+        else:
+            # Standard byte array flipping for CRC-32 text payloads
+            data_bytes = bytearray(str(payload_str).encode('utf-8'))
+            flipped_bits_count = 0
 
-        try:
-            corrupted_text = data_bytes.decode('utf-8', errors='replace')
-        except Exception:
-            corrupted_text = str(data_bytes)
+            for i in range(len(data_bytes)):
+                byte_val = data_bytes[i]
+                new_byte_val = 0
+                for bit in range(8):
+                    bit_val = (byte_val >> bit) & 1
+                    if random.random() < (self.ber_rate / 100.0):
+                        bit_val = 1 - bit_val
+                        flipped_bits_count += 1
+                    new_byte_val |= (bit_val << bit)
+                data_bytes[i] = new_byte_val
 
-        return corrupted_text, flipped_bits_count
+            try:
+                corrupted_text = data_bytes.decode('utf-8', errors='replace')
+            except Exception:
+                corrupted_text = str(data_bytes)
+
+            return corrupted_text, flipped_bits_count
 
     def handle_client(self, client_sock, client_addr):
         client_name = None
@@ -106,6 +116,7 @@ class ServerThread(QThread):
                     sender = packet.get("sender")
                     recipient = packet.get("recipient")
                     original_payload = packet.get("payload")
+                    metadata = packet.get("metadata", {})
                     
                     self.log_signal.emit(f"[Route] {sender} -> {recipient}: Original '{original_payload}'")
 
@@ -123,6 +134,7 @@ class ServerThread(QThread):
                                 "type": "incoming_message",
                                 "sender": sender,
                                 "payload": corrupted_payload,
+                                "metadata": metadata,
                                 "errors_injected": error_count
                             })
                             target_sock.sendall(forward_packet.encode('utf-8'))
