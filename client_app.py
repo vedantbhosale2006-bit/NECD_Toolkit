@@ -46,7 +46,7 @@ class ClientListenerThread(QThread):
 
     def stop(self):
         self.is_running = False
-
+        
 
 class ClientWindow(QMainWindow):
     def __init__(self):
@@ -57,6 +57,21 @@ class ClientWindow(QMainWindow):
         self.listener_thread = None
         self.init_ui()
 
+    @staticmethod
+    def get_local_ip():
+        """Automatically detects the machine's active local LAN IPv4 address."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            try:
+                return socket.gethostbyname(socket.gethostname())
+            except Exception:
+                return "127.0.0.1"
+            
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -72,7 +87,7 @@ class ClientWindow(QMainWindow):
         conn_layout.addWidget(self.name_input)
 
         conn_layout.addWidget(QLabel("IP:"))
-        self.ip_input = QLineEdit("127.0.0.1")
+        self.ip_input = QLineEdit(ClientWindow.get_local_ip())
         conn_layout.addWidget(self.ip_input)
         
         conn_layout.addWidget(QLabel("Port:"))
