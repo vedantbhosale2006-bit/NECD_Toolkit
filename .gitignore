@@ -4,12 +4,11 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
-# PyInstaller build artifacts (temp build folders and spec files)
+# PyInstaller build artifacts (temp build folders only)
 build/
-*.spec
 
-# Ignore compiled worker binaries inside the bin folder (optional, see note below)
+# Ignore compiled worker binaries inside the bin folder
 bin/
 
-# Ignore the root launcher executable (if you don't want local .exe builds tracked in Git)
+# Ignore the root launcher executable
 launcher.exe
