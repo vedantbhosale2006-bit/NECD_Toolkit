@@ -83,21 +83,28 @@ class LauncherWindow(QMainWindow):
         layout.addWidget(footer_label)
 
     def get_target_path(self, script_name, exe_name):
-        """Finds the executable inside the bin/ subfolder or falls back gracefully."""
+        """Finds the executable inside the bin/ subfolder or falls back gracefully to src/."""
         base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         
-        # 1. Look inside the 'bin' subfolder (Production .exe layout)
-        bin_exe_path = os.path.join(base_dir, "bin", exe_name)
+        # When running as compiled .exe from root, base_dir is root. 
+        # When running as python script, sys.argv[0] is in src/, so we account for root directory search.
+        if getattr(sys, 'frozen', False):
+            root_dir = base_dir
+        else:
+            root_dir = os.path.abspath(os.path.join(base_dir, ".."))
+
+        # 1. Look inside the 'bin' subfolder from root (Production .exe layout)
+        bin_exe_path = os.path.join(root_dir, "bin", exe_name)
         if os.path.exists(bin_exe_path):
             return [bin_exe_path]
             
-        # 2. Look in the same directory
-        exe_path = os.path.join(base_dir, exe_name)
+        # 2. Look in the root directory
+        exe_path = os.path.join(root_dir, exe_name)
         if os.path.exists(exe_path):
             return [exe_path]
             
-        # 3. Fallback to python interpreter + .py script (Development mode)
-        script_path = os.path.join(base_dir, script_name)
+        # 3. Fallback to python interpreter + .py script inside src/ (Development mode)
+        script_path = os.path.join(root_dir, "src", script_name)
         return [sys.executable, script_path]
 
     def launch_router(self):

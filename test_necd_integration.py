@@ -2,10 +2,10 @@ import time
 import subprocess
 import pytest
 
-# Adjust filenames if your launcher/modules have different paths
-LAUNCHER_SCRIPT = "launcher.py"
-ROUTER_SCRIPT = "router_proxy_app.py"
-CLIENT_SCRIPT = "client_app.py"
+# Adjusted paths to point to the src/ directory
+LAUNCHER_SCRIPT = "src/launcher.py"
+ROUTER_SCRIPT = "src/router_proxy_app.py"
+CLIENT_SCRIPT = "src/client_app.py"
 
 @pytest.fixture(scope="session")
 def app_cluster():
