@@ -23,6 +23,25 @@ QComboBox QAbstractItemView { background-color: #1a1a1e; color: #00f0ff; selecti
 QComboBox::drop-down { border: 0px; }
 """
 
+def format_bit_comparison(clean_bits, corrupted_bits):
+    """
+    Compares clean bits against corrupted bits and returns an HTML string:
+    - Mismatched/burst-corrupted bits are highlighted in bright red.
+    - Matching bits are shown in green.
+    """
+    formatted = []
+    max_len = max(len(clean_bits), len(corrupted_bits))
+    clean = clean_bits.ljust(max_len, '0')
+    corr = corrupted_bits.ljust(max_len, '0')
+    
+    for c_bit, r_bit in zip(clean, corr):
+        if c_bit != r_bit:
+            formatted.append(f"<span style='color: #ff5555; font-weight: bold;'>{r_bit}</span>")
+        else:
+            formatted.append(f"<span style='color: #50fa7b;'>{r_bit}</span>")
+            
+    return "".join(formatted)
+
 class ClientListenerThread(QThread):
     packet_received = pyqtSignal(dict)
     disconnected = pyqtSignal()
@@ -114,7 +133,7 @@ class ClientWindow(QMainWindow):
         algo_layout = QHBoxLayout()
         algo_layout.addWidget(QLabel("Error Control Algorithm:"))
         self.algo_combo = QComboBox()
-        self.algo_combo.addItems(["CRC-32 Checksum", "Hamming(7,4) Correction","1D Parity Check","2D Parity Matrix"])
+        self.algo_combo.addItems(["CRC-32 Checksum", "Hamming(7,4) Correction", "1D Parity Check", "2D Parity Matrix"])
         algo_layout.addWidget(self.algo_combo)
         send_layout.addLayout(algo_layout)
         
@@ -224,9 +243,7 @@ class ClientWindow(QMainWindow):
                     if len(nibble) < 4:
                         nibble = nibble.ljust(4, '0')
                     encoded_blocks.append(ErrorControlToolkit.hamming_encode(nibble))
-            
-                # Send the concatenated binary string as the payload 
-                # so the router proxy's binary noise injector flips individual 1s and 0s!
+                
                 payload_to_send = "".join(encoded_blocks)
                 metadata = {
                     "algorithm": "hamming74", 
@@ -237,7 +254,6 @@ class ClientWindow(QMainWindow):
 
             elif "1D Parity" in algo:
                 bits = ErrorControlToolkit.text_to_bits(payload)
-                # Split bits into 8-bit bytes (or chunks) and add 1D parity to each
                 encoded_blocks = []
                 for i in range(0, len(bits), 8):
                     chunk = bits[i:i+8].ljust(8, '0')
@@ -288,32 +304,32 @@ class ClientWindow(QMainWindow):
             metadata = packet.get("metadata", {})
             algo_type = metadata.get("algorithm", "crc32")
 
-            self.recv_console.append(f"[<-] Received from [{sender}] (Algorithm: {algo_type.upper()}):")
-
             if algo_type == "crc32":
                 expected_checksum = metadata.get("checksum", "")
                 computed_checksum = ErrorControlToolkit.compute_crc32(payload)
                 is_valid = ErrorControlToolkit.verify_crc32(payload, expected_checksum)
 
-                self.recv_console.append(f"    [Raw Payload]: '{payload}'")
-                self.recv_console.append(f"    [CRC-32 Check]:")
-                self.recv_console.append(f"       -> Expected Checksum: {expected_checksum}")
-                self.recv_console.append(f"       -> Computed Checksum: {computed_checksum}")
-                if is_valid:
-                    self.recv_console.append(f"       -> Status: SUCCESS ✅ (Data is uncorrupted)")
-                else:
-                    self.recv_console.append(f"       -> Status: FAILED ❌ (Bit error detected!)")
+                html_block = f"""
+                <div style="margin-left: 20px;">
+                    <b>[<-] Received from [{sender}] (Algorithm: CRC-32):</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;-> Raw Payload: '{payload}'<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;-> CRC-32 Check:<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Expected Checksum: {expected_checksum}<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Computed Checksum: {computed_checksum}<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Status: {'SUCCESS ✅ (Data is uncorrupted)' if is_valid else 'FAILED ❌ (Bit error detected!)'}
+                </div>
+                """
+                self.recv_console.append(html_block)
 
             elif algo_type == "hamming74":
-                payload_bits = payload # This is now the corrupted bitstream from the router
+                payload_bits = payload 
                 original_bit_len = metadata.get("original_bit_len", len(payload_bits))
                 
                 received_blocks = []
-                healed_blocks = []
-                healed_bits = ""
+                formatted_list_items = []
+                raw_healed_bits = ""
                 total_errors_corrected = 0
 
-                # Process the corrupted bitstream in 7-bit blocks
                 for i in range(0, len(payload_bits), 7):
                     chunk = payload_bits[i:i+7]
                     if len(chunk) < 7:
@@ -321,31 +337,39 @@ class ClientWindow(QMainWindow):
                     
                     received_blocks.append(chunk)
                     healed_nibble, err_count = ErrorControlToolkit.hamming_decode(chunk)
-                    
-                    # Reconstruct the healed 7-bit block for display
-                    # (re-encode the healed nibble to show what the clean block looks like)
                     healed_block = ErrorControlToolkit.hamming_encode(healed_nibble)
-                    healed_blocks.append(healed_block)
                     
-                    healed_bits += healed_nibble
+                    colored_block = format_bit_comparison(healed_block, chunk)
+                    formatted_list_items.append(f"'{colored_block}'")
+                    
+                    raw_healed_bits += healed_nibble
                     total_errors_corrected += err_count
 
-                healed_bits = healed_bits[:original_bit_len]
+                # Fix truncation: slice before text conversion
+                healed_bits = raw_healed_bits[:original_bit_len]
                 recovered_text = ErrorControlToolkit.bits_to_text(healed_bits)
 
-                self.recv_console.append(f"    [Hamming(7,4) Correction Details]:")
-                self.recv_console.append(f"       -> Received Corrupted Blocks: {received_blocks}")
-                self.recv_console.append(f"       -> Healed / Corrected Blocks: {healed_blocks}")
-                self.recv_console.append(f"       -> Single-Bit Errors Corrected: {total_errors_corrected}")
-                self.recv_console.append(f"       -> Recovered Message: '{recovered_text}'")
+                list_display = "[" + ", ".join(formatted_list_items) + "]"
+
+                html_block = f"""
+                <div style="margin-left: 20px;">
+                    <b>[<-] Received from [{sender}] (Algorithm: HAMMING(7,4)):</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;-> Hamming(7,4) Correction Details:<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Received Blocks (Red=Corrupted, Green=Clean):<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>{list_display}</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Single-Bit Errors Corrected: {total_errors_corrected}<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Recovered Message: '{recovered_text}'
+                </div>
+                """
+                self.recv_console.append(html_block)
                 
             elif algo_type == "parity_1d":
                 original_len = metadata.get("original_len", len(payload))
                 received_blocks = []
+                formatted_list_items = []
                 errors_detected = 0
-                processed_bits = ""
+                raw_processed_bits = ""
 
-                # Each 1D parity block is 9 bits (8 data + 1 parity)
                 for i in range(0, len(payload), 9):
                     chunk = payload[i:i+9]
                     if len(chunk) < 9:
@@ -355,20 +379,46 @@ class ClientWindow(QMainWindow):
                     is_valid = ErrorControlToolkit.verify_1d_parity(chunk, parity_type='even')
                     if not is_valid:
                         errors_detected += 1
-                    processed_bits += chunk[:8]
+                    raw_processed_bits += chunk[:8]
 
-                processed_bits = processed_bits[:original_len]
-                recovered_text = ErrorControlToolkit.bits_to_text(processed_bits)
+                for chunk in received_blocks:
+                    data_part = chunk[:8]
+                    parity_bit = chunk[8] if len(chunk) > 8 else '0'
+                    
+                    # Verify if this specific block is valid
+                    block_valid = (data_part.count('1') % 2 == 0 and parity_bit == '0') or \
+                                  (data_part.count('1') % 2 != 0 and parity_bit == '1')
+                    
+                    if block_valid:
+                        # Clean block: all green
+                        colored = f"<span style='color: #50fa7b;'>{chunk}</span>"
+                    else:
+                        # Corrupted block: show data part in white/green, but highlight the parity failure/bit in red
+                        colored = f"<span style='color: #50fa7b;'>{data_part}</span><span style='color: #ff5555; font-weight: bold;'>{parity_bit}</span>"
+                    
+                    formatted_list_items.append(f"'{colored}'")
 
-                self.recv_console.append(f"    [1D Parity Details]:")
-                self.recv_console.append(f"       -> Received 9-bit Blocks: {received_blocks}")
-                self.recv_console.append(f"       -> Parity Errors Detected: {errors_detected}")
-                self.recv_console.append(f"       -> Recovered Message: '{recovered_text}'")
+                processed_bits = raw_processed_bits[:original_len]
+                received_text = ErrorControlToolkit.bits_to_text(processed_bits)
+                
+                list_display = "[" + ", ".join(formatted_list_items) + "]"
+
+                html_block = f"""
+                <div style="margin-left: 20px;">
+                    <b>[<-] Received from [{sender}] (Algorithm: 1D PARITY):</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;-> 1D Parity Details:<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Received Blocks (Data=Green, Parity Mismatch=Red):<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>{list_display}</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Parity Errors Detected: {errors_detected}<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Received Message: '{received_text}'
+                </div>
+                """
+                self.recv_console.append(html_block)
 
             elif algo_type == "parity_2d":
                 original_len = metadata.get("original_len", len(payload))
                 received_blocks = []
-                row_size = 8  # 7 data bits + 1 parity bit based on core_tools implementation
+                row_size = 8  
                 
                 for i in range(0, len(payload), row_size):
                     chunk = payload[i:i+row_size]
@@ -376,17 +426,32 @@ class ClientWindow(QMainWindow):
                         chunk = chunk.ljust(row_size, '0')
                     received_blocks.append(chunk)
 
+                raw_blocks_snapshot = list(received_blocks)
                 corrected_matrix, corrections_made = ErrorControlToolkit.verify_and_correct_2d_parity(received_blocks)
                 
-                # Reconstruct bits from corrected rows
-                processed_bits = "".join([row[:-1] for row in corrected_matrix if len(row) > 1])
-                processed_bits = processed_bits[:original_len]
+                raw_processed_bits = "".join([row[:-1] for row in corrected_matrix if len(row) > 1])
+                # Fix truncation: slice before text conversion
+                processed_bits = raw_processed_bits[:original_len]
                 recovered_text = ErrorControlToolkit.bits_to_text(processed_bits)
 
-                self.recv_console.append(f"    [2D Parity Matrix Details]:")
-                self.recv_console.append(f"       -> Received Matrix Blocks: {received_blocks}")
-                self.recv_console.append(f"       -> Matrix Corrections Made: {corrections_made}")
-                self.recv_console.append(f"       -> Recovered Message: '{recovered_text}'")
+                formatted_list_items = []
+                for clean_row, raw_row in zip(corrected_matrix, raw_blocks_snapshot):
+                    colored = format_bit_comparison(clean_row, raw_row)
+                    formatted_list_items.append(f"'{colored}'")
+
+                list_display = "[" + ", ".join(formatted_list_items) + "]"
+
+                html_block = f"""
+                <div style="margin-left: 20px;">
+                    <b>[<-] Received from [{sender}] (Algorithm: 2D PARITY):</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;-> 2D Parity Matrix Details:<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Matrix Rows Received (Red=Fixed, Green=Clean):<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>{list_display}</b><br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Matrix Corrections Made: {corrections_made}<br>
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-> Recovered Message: '{recovered_text}'
+                </div>
+                """
+                self.recv_console.append(html_block)
                 
         elif p_type == "error":
             err_msg = packet.get("message")

@@ -128,8 +128,8 @@ class ErrorControlToolkit:
     @staticmethod
     def compute_2d_parity(data_stream: str) -> list[str]:
         """Arrange data into a row-column matrix and compute row/column parities."""
-        # Split data stream into chunks of 7 bits to form matrix rows
-        row_size = 7
+        # Split data stream into chunks of 8 bits to form matrix rows
+        row_size = 8
         rows = [data_stream[i:i+row_size] for i in range(0, len(data_stream), row_size)]
         
         if rows and len(rows[-1]) < row_size:

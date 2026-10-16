@@ -23,6 +23,22 @@ QPushButton:pressed { background-color: #015f43; }
 QTextEdit, QLineEdit { background-color: #121214; border: 1px solid #29292e; border-radius: 6px; color: #00f0ff; font-family: 'Consolas', monospace; padding: 8px; }
 """
 
+# HELPER FUNCTION FOR ERROR BIT SHOWCASE
+def format_payload_comparison(original, corrupted):
+    """Compares original and corrupted payloads, highlighting only the changes."""
+    formatted = []
+    max_len = max(len(original), len(corrupted))
+    orig = str(original).ljust(max_len, '\x00')
+    corr = str(corrupted).ljust(max_len, '\x00')
+    
+    for o, c in zip(orig, corr):
+        if o != c:
+            formatted.append(f"<span style='color: #ff5555; font-weight: bold;'>{c}</span>")
+        else:
+            formatted.append(f"<span style='color: #00f0ff;'>{c}</span>")
+            
+    return "".join(formatted)
+
 class ServerThread(QThread):
     log_signal = pyqtSignal(str)
 
@@ -118,14 +134,20 @@ class ServerThread(QThread):
                     original_payload = packet.get("payload")
                     metadata = packet.get("metadata", {})
                     
-                    self.log_signal.emit(f"[Route] {sender} -> {recipient}: Original '{original_payload}'")
+                    self.log_signal.emit(f"[Route] <span style='color: #00f0ff;'>{sender}</span> -> <span style='color: #00f0ff;'>{recipient}</span>: Original '{original_payload}'")
 
                     # Apply Noise Simulation
                     corrupted_payload, error_count = self.inject_noise(original_payload)
+                    
                     if error_count > 0:
-                        self.log_signal.emit(f"[Noise] Injected {error_count} bit error(s) via BER ({self.ber_rate}%). Corrupted: '{corrupted_payload}'")
+                        # Highlight ONLY the changed bits/characters
+                        visual_diff = format_payload_comparison(original_payload, corrupted_payload)
+                        self.log_signal.emit(
+                            f"[Noise] <span style='color: #ff5555; font-weight: bold;'>Injected {error_count} bit error(s) ({self.ber_rate}%):</span> "
+                            f"['{visual_diff}']"
+                        )
                     else:
-                        self.log_signal.emit(f"[Noise] Packet passed cleanly through channel (0 errors).")
+                        self.log_signal.emit(f"[Noise] <span style='color: #50fa7b;'>Packet passed cleanly through channel (0 errors).</span>")
 
                     with self.clients_lock:
                         if recipient in self.clients:
@@ -205,15 +227,20 @@ class RouterProxyWindow(QMainWindow):
         # Control Panel Header
         control_group = QGroupBox("Router Node Controls")
         control_layout = QHBoxLayout(control_group)
+        control_layout.setContentsMargins(15, 20, 15, 15)  # Add top padding for the title
+        control_layout.setSpacing(10)
         
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
         
-        control_layout.addWidget(QLabel(f"Host IP: {local_ip}"))
-        control_layout.addWidget(QLabel("Port:"))
+        control_layout.addWidget(QLabel(f"<b>Host IP:</b> {local_ip}"))
+        control_layout.addWidget(QLabel("<b>Port:</b>"))
         self.port_input = QLineEdit("5000")
+        self.port_input.setFixedWidth(80)
         control_layout.addWidget(self.port_input)
 
+        control_layout.addStretch() # Push button cleanly to the right
+        
         self.start_btn = QPushButton("Start Router Server")
         self.start_btn.clicked.connect(self.toggle_server)
         control_layout.addWidget(self.start_btn)
@@ -280,6 +307,7 @@ class RouterProxyWindow(QMainWindow):
             self.start_btn.setStyleSheet("background-color: #00b37e;")
 
     def log_message(self, text):
+        """Appends log messages and renders HTML color formatting correctly."""
         self.console.append(text)
 
 

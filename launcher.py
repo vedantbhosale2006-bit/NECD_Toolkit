@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import os
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, 
     QVBoxLayout, QHBoxLayout
@@ -81,17 +82,37 @@ class LauncherWindow(QMainWindow):
         footer_label.setStyleSheet("color: #6c6c80; font-size: 11px;")
         layout.addWidget(footer_label)
 
+    def get_target_path(self, script_name, exe_name):
+        """Finds the executable inside the bin/ subfolder or falls back gracefully."""
+        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        
+        # 1. Look inside the 'bin' subfolder (Production .exe layout)
+        bin_exe_path = os.path.join(base_dir, "bin", exe_name)
+        if os.path.exists(bin_exe_path):
+            return [bin_exe_path]
+            
+        # 2. Look in the same directory
+        exe_path = os.path.join(base_dir, exe_name)
+        if os.path.exists(exe_path):
+            return [exe_path]
+            
+        # 3. Fallback to python interpreter + .py script (Development mode)
+        script_path = os.path.join(base_dir, script_name)
+        return [sys.executable, script_path]
+
     def launch_router(self):
-        """Spawns the router application as a separate subprocess."""
+        """Spawns the router application."""
         try:
-            subprocess.Popen([sys.executable, "router_proxy_app.py"])
+            cmd = self.get_target_path("router_proxy_app.py", "router_proxy_app.exe")
+            subprocess.Popen(cmd)
         except Exception as e:
             print(f"Error launching router: {e}")
 
     def launch_client(self):
-        """Spawns the client application as a separate subprocess."""
+        """Spawns the client application."""
         try:
-            subprocess.Popen([sys.executable, "client_app.py"])
+            cmd = self.get_target_path("client_app.py", "client_app.exe")
+            subprocess.Popen(cmd)
         except Exception as e:
             print(f"Error launching client: {e}")
 
