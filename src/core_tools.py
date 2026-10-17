@@ -160,6 +160,7 @@ class ErrorControlToolkit:
         if not received_matrix or len(received_matrix) < 2:
             return received_matrix, 0
 
+        # Extract data rows (all rows except the last column-parity row)
         data_rows = [list(row[:-1]) for row in received_matrix[:-1]]
         row_parities = [row[-1] for row in received_matrix[:-1]]
         col_parity_row = list(received_matrix[-1][:-1])
@@ -168,38 +169,40 @@ class ErrorControlToolkit:
         num_rows = len(data_rows)
         num_cols = len(data_rows[0]) if num_rows > 0 else 0
 
-        # Check row parities
-        bad_row = -1
+        # Collect ALL bad rows (no premature break)
+        bad_rows = []
         for r in range(num_rows):
             ones = data_rows[r].count('1')
             expected_p = '0' if ones % 2 == 0 else '1'
             if expected_p != row_parities[r]:
-                bad_row = r
-                break
+                bad_rows.append(r)
 
-        # Check column parities
-        bad_col = -1
+        # Collect ALL bad columns (no premature break)
+        bad_cols = []
         for c in range(num_cols):
             col_bits = [data_rows[r][c] for r in range(num_rows)]
             ones = col_bits.count('1')
             expected_p = '0' if ones % 2 == 0 else '1'
-            # Compare against calculated or received column parity if available
             if c < len(col_parity_row) and expected_p != col_parity_row[c]:
-                bad_col = c
-                break
+                bad_cols.append(c)
 
-        # If a single-bit error intersection is found, flip it!
-        if bad_row != -1 and bad_col != -1:
-            data_rows[bad_row][bad_col] = '1' if data_rows[bad_row][bad_col] == '0' else '0'
+        # If exactly ONE row and ONE noise column fail, it's a single-bit error we can correct!
+        if len(bad_rows) == 1 and len(bad_cols) == 1:
+            r = bad_rows[0]
+            c = bad_cols[0]
+            # Flip the erroneous bit at the intersection
+            data_rows[r][c] = '1' if data_rows[r][c] == '0' else '0'
             corrections_made += 1
 
-        # Rebuild formatted rows
+        # Rebuild formatted rows with correct recalculated parities for UI display
         corrected_matrix = []
         for r in range(num_rows):
             row_str = "".join(data_rows[r])
             ones = row_str.count('1')
             p = '0' if ones % 2 == 0 else '1'
             corrected_matrix.append(row_str + p)
+        
+        # Keep the original received column parity row as the last element
         corrected_matrix.append(received_matrix[-1])
 
         return corrected_matrix, corrections_made

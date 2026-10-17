@@ -418,7 +418,7 @@ class ClientWindow(QMainWindow):
             elif algo_type == "parity_2d":
                 original_len = metadata.get("original_len", len(payload))
                 received_blocks = []
-                row_size = 8  
+                row_size = 9  
                 
                 for i in range(0, len(payload), row_size):
                     chunk = payload[i:i+row_size]
@@ -429,7 +429,9 @@ class ClientWindow(QMainWindow):
                 raw_blocks_snapshot = list(received_blocks)
                 corrected_matrix, corrections_made = ErrorControlToolkit.verify_and_correct_2d_parity(received_blocks)
                 
-                raw_processed_bits = "".join([row[:-1] for row in corrected_matrix if len(row) > 1])
+                # FIX: Only extract data bits from the actual data rows (exclude the final column-parity row)
+                raw_processed_bits = "".join([row[:-1] for row in corrected_matrix[:-1]])
+                
                 # Fix truncation: slice before text conversion
                 processed_bits = raw_processed_bits[:original_len]
                 recovered_text = ErrorControlToolkit.bits_to_text(processed_bits)
