@@ -10,7 +10,6 @@
 
 ## 📹 Demonstration & Repository Links
 * **YouTube Video Demonstration:** [Watch On Youtube](https://www.youtube.com/watch?v=dCrlM2PoTTg)  
-* **GitHub Repository:** [CN-Lab-2026-27 NECD_Toolkit](https://github.com/CN-Lab-2026-27/NECD_Toolkit)
 
 ---
 
